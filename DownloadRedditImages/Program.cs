@@ -241,7 +241,7 @@ namespace DownloadRedditImages
             if (checkpointFile.Exists)
             {
                 var checkpoint = JsonSerializer.Deserialize<Checkpoint>(File.ReadAllText(checkpointFile.FullName));
-                Info($"Resuming from checkpoint timestamp {checkpoint.NewestCreated}");
+                Info($"Resuming from checkpoint timestamp {DateTimeOffset.FromUnixTimeSeconds(checkpoint.NewestCreated)}");
                 return checkpoint;
             }
 
@@ -316,6 +316,7 @@ namespace DownloadRedditImages
         [property: JsonPropertyName("height")] int Height,
         [property: JsonPropertyName("width")] int Width,
         [property: JsonPropertyName("url")] Uri Uri);
+
     internal record MediaMetadata(
         [property: JsonPropertyName("e")] string MediaType,
         [property: JsonPropertyName("p")] IReadOnlyList<Media> Previews,
