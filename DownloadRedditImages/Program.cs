@@ -251,17 +251,13 @@ namespace DownloadRedditImages
         private static ParsedImage? Parse<TImage>(IImageMetadata<TImage> imageMetadata, Uri submissionUri)
         where TImage : IImage
         {
-            if (submissionUri == new Uri("https://www.reddit.com/gallery/n22rbk"))
-            {
-                Console.WriteLine();
-            }
             if (imageMetadata.Source?.Uri is null)
             {
                 Warn($"Rejecting an invalid media from post {submissionUri} because it has no source image: {JsonSerializer.Serialize(imageMetadata)}");
                 return null;
             }
 
-            // Note: Reddit sometimes returns image URLs with HTML encoded ampersands, like https://preview.redd.it/yp20vnw3fdw61.jpg?width=108&amp;crop=smart&amp;auto=webp&amp;s=31797b476190709566e62deb9a26ddc5e2ee3f58, so this fixes those URLs
+            // Note: Reddit sometimes returns image URLs with HTML encoded ampersands, like https://preview.redd.it/yp20vnw3fdw61.jpg?width=108&amp;crop=smart&amp;auto=webp&amp;s=31797b476190709566e62deb9a26ddc5e2ee3f58, so this fixes those URLs.
             var sourceUri = new Uri(WebUtility.HtmlDecode(imageMetadata.Source.Uri.ToString()));
 
             if (imageMetadata is MediaMetadata mediaMetadata && mediaMetadata.MediaType != "Image")
