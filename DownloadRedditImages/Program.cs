@@ -97,10 +97,10 @@ namespace DownloadRedditImages
                         continue;
                     }
 
-                    if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var similarity, out var perceptualDuplicateOf))
+                    if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var hammingDistance, out var perceptualDuplicateOf))
                     {
                         perceptualDuplicateHashes.Add(perceptualHash);
-                        Info($"Near-duplicate image ignored because it had a {similarity}% perceptual hash similarity to a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
+                        Info($"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
                         continue;
                     }
 
