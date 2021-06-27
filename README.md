@@ -54,9 +54,9 @@ A `checkpoint.json` file is also written to the folder containing the images, an
 Requires the .NET 5 SDK. Run this:
 
 ```
-dotnet publish -c Release --self-contained -p:PublishTrimmed=true --runtime win-x64
-dotnet publish -c Release --self-contained -p:PublishTrimmed=true --runtime osx-x64
-dotnet publish -c Release --self-contained -p:PublishTrimmed=true --runtime linux-x64
+dotnet publish -c Release -p:PublishTrimmed=true --runtime win-x64
+dotnet publish -c Release -p:PublishTrimmed=true --runtime osx-x64
+dotnet publish -c Release -p:PublishTrimmed=true --runtime linux-x64
 ```
 
 Output will be in `DownloadRedditImages\bin\Release\net5.0\win-x64\publish` (and similar for the Linux and Mac builds). Zip the folders, and upload.
