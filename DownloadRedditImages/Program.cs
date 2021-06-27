@@ -30,6 +30,12 @@ namespace DownloadRedditImages
 
         private static async Task Main(string[] args)
         {
+            if (args.Length == 0)
+            {
+                Info("Pass a space-separated list of usernames as input. Images for each user will be downloaded to the directory specified in appsettings.json.");
+                return;
+            }
+
             if (!Appsettings.OutputDirectory.Exists)
             {
                 Appsettings.OutputDirectory.Create();

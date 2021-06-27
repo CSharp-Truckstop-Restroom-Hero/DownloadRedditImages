@@ -30,13 +30,13 @@ The file `appsettings.json` has two configuration settings:
 
 ### Run the app
 
-Pass Reddit usernames as arguments to the executable. In this example, I use [this user](https://www.reddit.com/user/dmishin/):
+Pass 1 or more Reddit usernames as arguments to the executable, separated by spaces. In this example, I use [this user](https://www.reddit.com/user/dmishin/):
 
 ```
 DownloadRedditImages.exe dmishin
 ```
 
-It will log a bunch a bunch as it downloads images.
+It will log as it downloads images.
 
 If you run the app again, it will intelligently skip re-downloading images that were already downloaded, and only download new images since the last run.
 
@@ -57,3 +57,14 @@ A `checkpoint.json` file is also written to the folder containing the images, an
 - **An error happened while downloading and the app crashed. What do I do?**: Run the app again. It will resume where it left off. If it dies repeatedly, file a bug.
 - **Does this download videos?**: No.
 - **Pushshift API is down. This app no longer works. What do I do?**: `git commit -m suicide`
+
+## Publishing a new release
+
+Run this:
+
+```
+dotnet publish -c Release --self-contained --runtime win-x64 -p:PublishTrimmed=true
+dotnet publish -c Release --self-contained --runtime linux-x64 -p:PublishTrimmed=true
+```
+
+Output will be in `DownloadRedditImages\bin\Release\net5.0\win-x64\publish` (and similar for the Linux build).
