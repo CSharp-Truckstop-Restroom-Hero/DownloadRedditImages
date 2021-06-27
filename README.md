@@ -10,7 +10,7 @@ You'll need to get the app, configure it, and run it.
 
 ### Get the app
 
-Download and unzip [a release](TODO) that matches your platform (Windows or Linux).
+Download and unzip [a release](https://github.com/CSharp-Truckstop-Restroom-Hero/DownloadRedditImages/releases) that matches your platform (Windows or Linux).
 
 Alternately, if you have the .NET 5 SDK installed, you can compile from source:
 
