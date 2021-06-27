@@ -93,7 +93,7 @@ namespace DownloadRedditImages
 
                     if (perceptualDuplicateHashes.Contains(perceptualHash))
                     {
-                        Info($"Duplicate image ignored because it had the same perceptual hash as a previous near-duplicate that was ignored: {decodedSourceUri}");
+                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {decodedSourceUri}");
                         continue;
                     }
 
