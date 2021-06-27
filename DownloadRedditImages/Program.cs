@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -10,8 +9,6 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
-using CoenM.ImageHash;
-using CoenM.ImageHash.HashAlgorithms;
 using Force.Crc32;
 using Shipwreck.Phash;
 using Shipwreck.Phash.Bitmaps;
@@ -21,97 +18,23 @@ namespace DownloadRedditImages
     internal static class Program
     {
         private static readonly HttpClient HttpClient = new();
-        private static readonly PerceptualHash PerceptualHash = new();
         private static readonly Appsettings Appsettings = LoadAppsettings();
 
         private static Appsettings LoadAppsettings()
         {
-            var (outputDirectory, perceptualHashSimilarityThreshold) = JsonSerializer.Deserialize<RawAppsettings>(File.ReadAllText(Path.Combine(
+            var (outputDirectory, maxHammingDistance) = JsonSerializer.Deserialize<RawAppsettings>(File.ReadAllText(Path.Combine(
                 Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
                 "appsettings.json")));
-            return new Appsettings(new DirectoryInfo(outputDirectory), perceptualHashSimilarityThreshold);
+            return new Appsettings(new DirectoryInfo(outputDirectory), maxHammingDistance);
         }
 
         private static async Task Main(string[] args)
         {
-            var hash1 = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom1.jpg")).ToLuminanceImage());
-            var hash2 = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom2.jpg")).ToLuminanceImage());
-            var hash3 = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom3.jpg")).ToLuminanceImage());
-            var hash4 = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom4.jpg")).ToLuminanceImage());
-            var hashup = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\up.jpg")).ToLuminanceImage());
-            var hashdown = ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\down.jpg")).ToLuminanceImage());
-            Info($"1-2: {ImagePhash.GetHammingDistance(hash1, hash2)}");
-            Info($"1-3: {ImagePhash.GetHammingDistance(hash1, hash3)}");
-            Info($"1-4: {ImagePhash.GetHammingDistance(hash1, hash4)}");
-            Info($"up-down: {ImagePhash.GetHammingDistance(hashup, hashdown)}");
-            Info($"1-up: {ImagePhash.GetHammingDistance(hash1, hashup)}");
-            Info("");
-
-            var rhash1 = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom1.jpg")).ToLuminanceImage());
-            var rhash2 = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom2.jpg")).ToLuminanceImage());
-            var rhash3 = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom3.jpg")).ToLuminanceImage());
-            var rhash4 = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\zoom4.jpg")).ToLuminanceImage());
-            var rhashup = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\up.jpg")).ToLuminanceImage());
-            var rhashdown = ImagePhash.ComputeDigest(((Bitmap) System.Drawing.Image.FromFile("E:\\Media\\Porn\\Reddit\\down.jpg")).ToLuminanceImage());
-            Info($"1-2: {ImagePhash.GetCrossCorrelation(rhash1, rhash2)}");
-            Info($"1-3: {ImagePhash.GetCrossCorrelation(rhash1, rhash3)}");
-            Info($"1-4: {ImagePhash.GetCrossCorrelation(rhash1, rhash4)}");
-            Info($"up-down: {ImagePhash.GetCrossCorrelation(rhashup, rhashdown)}");
-            Info($"1-up: {ImagePhash.GetCrossCorrelation(rhash1, rhashup)}");
-            Info("");
-
-
-            hash1 = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\zoom1.jpg"));
-            hash2 = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\zoom2.jpg"));
-            hash3 = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\zoom3.jpg"));
-            hash4 = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\zoom4.jpg"));
-            hashup = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\up.jpg"));
-            hashdown = PerceptualHash.Hash(File.OpenRead("E:\\Media\\Porn\\Reddit\\down.jpg"));
-            Info($"1-2: {CompareHash.Similarity(hash1, hash2)}");
-            Info($"1-3: {CompareHash.Similarity(hash1, hash3)}");
-            Info($"1-4: {CompareHash.Similarity(hash1, hash4)}");
-            Info($"up-down: {CompareHash.Similarity(hashup, hashdown)}");
-            Info($"1-up: {CompareHash.Similarity(hash1, hashup)}");
-            Info("");
-
-            var preview = Enumerable.Repeat(File.OpenRead("E:\\Media\\Porn\\Reddit\\preview.jpg"), 10).ToList();
-            var stopwatch = Stopwatch.StartNew();
-            for (int i = 0; i < 10; i++)
-            {
-                ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromStream(preview[i])).ToLuminanceImage());
-                // PerceptualHash.Hash(preview[i]);
-                preview[i].Position = 0;
-            }
-            var elapsed = stopwatch.ElapsedMilliseconds;
-            Info(elapsed.ToString());
-
-            // var hashes = Directory.EnumerateFiles("E:\\Media\\Porn\\Reddit\\ImNotYourAverageMom", "*.jpg")
-            //     .Select(f => (f, ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromFile(f)).ToLuminanceImage())))
-            //     .ToList();
-            // var minDistance = (1000, "", "");
-            // for (int i = 0; i < hashes.Count; i++)
-            // {
-            //     for (int j = 0; j < i; j++)
-            //     {
-            //         var distance = ImagePhash.GetHammingDistance(hashes[i].Item2, hashes[j].Item2);
-            //         if (distance < minDistance.Item1)
-            //         {
-            //             minDistance = (distance, hashes[i].f, hashes[j].f);
-            //         }
-            //     }
-            // }
-            // Info($"Minimum distance among user photos: {minDistance.Item1} {minDistance.Item2} {minDistance.Item3}");
-            if (args.Length == 0)
-            {
-                Info("Pass a space-separated list of usernames as input. Images for each user will be downloaded to the directory specified in appsettings.json.");
-                return;
-            }
-            
             if (!Appsettings.OutputDirectory.Exists)
             {
                 Appsettings.OutputDirectory.Create();
             }
-            
+
             foreach (var author in args)
             {
                 await Download(author);
@@ -147,52 +70,53 @@ namespace DownloadRedditImages
                     }
 
                     var previewResponseBytes = await previewResponse.Content.ReadAsByteArrayAsync();
-                    var castagnoliHash = Crc32CAlgorithm.Compute(previewResponseBytes);
-                    if (!castagnoliHashes.Contains(castagnoliHash))
-                    {
-                        using var previewResponseStream = new MemoryStream(previewResponseBytes);
-                        var perceptualHash = PerceptualHash.Hash(previewResponseStream);
-                        if (!perceptualHashes.Contains(perceptualHash))
-                        {
-                            if (!perceptualDuplicateHashes.Contains(perceptualHash))
-                            {
-                                if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var similarity, out var perceptualDuplicateOf))
-                                {
-                                    Info($"Near-duplicate image ignored because it had a {similarity}% perceptual hash similarity to a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
-                                    perceptualDuplicateHashes.Add(perceptualHash);
-                                }
-                                else
-                                {
-                                    var sourceResponse = await HttpClient.GetAsync(decodedSourceUri);
-                                    if (!sourceResponse.IsSuccessStatusCode)
-                                    {
-                                        Error($"Failed to download {decodedPreviewUri}, status code {sourceResponse.StatusCode}");
-                                    }
-                                    else
-                                    {
-                                        var filePath = Path.Combine(authorDirectory.FullName, $"{perceptualHash} {castagnoliHash}.jpg");
-                                        await File.WriteAllBytesAsync(filePath, await sourceResponse.Content.ReadAsByteArrayAsync());
-                                        Info($"Saved {decodedSourceUri} to {filePath}");
 
-                                        castagnoliHashes.Add(castagnoliHash);
-                                        perceptualHashes.Add(perceptualHash);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                Info($"Duplicate image ignored because it had the same perceptual hash as a previous near-duplicate that was ignored: {decodedSourceUri}");
-                            }
-                        }
-                        else
-                        {
-                            Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {decodedSourceUri}");
-                        }
-                    }
-                    else
+                    var castagnoliHash = Crc32CAlgorithm.Compute(previewResponseBytes);
+                    if (!castagnoliHashes.Add(castagnoliHash))
                     {
                         Info($"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        continue;
                     }
+
+                    var perceptualHash = PerceptualHash(previewResponseBytes);
+                    if (perceptualHashes.Contains(perceptualHash))
+                    {
+                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        continue;
+                    }
+
+                    if (perceptualDuplicateHashes.Contains(perceptualHash))
+                    {
+                        Info($"Duplicate image ignored because it had the same perceptual hash as a previous near-duplicate that was ignored: {decodedSourceUri}");
+                        continue;
+                    }
+
+                    if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var similarity, out var perceptualDuplicateOf))
+                    {
+                        perceptualDuplicateHashes.Add(perceptualHash);
+                        Info($"Near-duplicate image ignored because it had a {similarity}% perceptual hash similarity to a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
+                        continue;
+                    }
+
+                    var filePath = Path.Combine(authorDirectory.FullName, $"{perceptualHash} {castagnoliHash}.jpg");
+                    if (File.Exists(filePath))
+                    {
+                        perceptualHashes.Add(perceptualHash);
+                        Info($"Skipping download because {filePath} already exists.");
+                        continue;
+                    }
+
+                    var sourceResponse = await HttpClient.GetAsync(decodedSourceUri);
+                    if (!sourceResponse.IsSuccessStatusCode)
+                    {
+                        Error($"Failed to download {decodedPreviewUri}, status code {sourceResponse.StatusCode}");
+                        castagnoliHashes.Remove(castagnoliHash);
+                        continue;
+                    }
+
+                    await File.WriteAllBytesAsync(filePath, await sourceResponse.Content.ReadAsByteArrayAsync());
+                    perceptualHashes.Add(perceptualHash);
+                    Info($"Saved {decodedSourceUri} to {filePath}");
                 }
                 WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes));
             }
@@ -201,27 +125,33 @@ namespace DownloadRedditImages
         private static bool IsPerceptualDuplicate(
             ulong perceptualHash,
             HashSet<ulong> perceptualHashes,
-            out double? similarity,
+            out int? hammingDistance,
             out ulong? perceptualDuplicateOf)
         {
             foreach (var existingPerceptualHash in perceptualHashes)
             {
-                similarity = CompareHash.Similarity(perceptualHash, existingPerceptualHash);
-                if (similarity > Appsettings.PerceptualHashSimilarityThreshold)
+                hammingDistance = ImagePhash.GetHammingDistance(perceptualHash, existingPerceptualHash);
+                if (hammingDistance <= Appsettings.MaxHammingDistance)
                 {
                     perceptualDuplicateOf = existingPerceptualHash;
                     return true;
                 }
             }
 
-            similarity = null;
+            hammingDistance = null;
             perceptualDuplicateOf = null;
             return false;
         }
 
+        private static ulong PerceptualHash(byte[] imageContent)
+        {
+            using var previewResponseStream = new MemoryStream(imageContent);
+            return ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromStream(previewResponseStream)).ToLuminanceImage());
+        }
+
         private static async Task<ParsedSubmissionResponse> Get(string author, int createdAfter)
         {
-            Info($"Getting submissions after {createdAfter}.");
+            Info($"Getting submissions after {DateTimeOffset.FromUnixTimeSeconds(createdAfter)}.");
             var response = await HttpClient.GetStringAsync(GetUriFor(author, createdAfter));
             var submissionResponse = JsonSerializer.Deserialize<SubmissionResponse>(response);
             if (submissionResponse!.Data.Count == 0)
@@ -249,7 +179,7 @@ namespace DownloadRedditImages
                 }
                 else
                 {
-                    Error($"Found no images in post {submission?.Uri}");
+                    Info($"Found no images in post {submission?.Uri}");
                 }
             }
 
@@ -276,8 +206,7 @@ namespace DownloadRedditImages
 
         private static ParsedImage Parse(MediaMetadata mediaMetadata)
         {
-            if (mediaMetadata.Source?.Uri != null && mediaMetadata.MediaType == "Image" && mediaMetadata.ContentType ==
-                "image/jpg")
+            if (mediaMetadata.Source?.Uri != null && mediaMetadata.MediaType == "Image")
             {
                 var minPreview = mediaMetadata?.Previews
                     ?.Where(p => p.Height * p.Width > 0)
@@ -346,11 +275,11 @@ namespace DownloadRedditImages
 
     internal record Appsettings(
         DirectoryInfo OutputDirectory,
-        double PerceptualHashSimilarityThreshold);
+        ushort MaxHammingDistance);
 
     internal record RawAppsettings(
         string OutputDirectory,
-        double PerceptualHashSimilarityThreshold);
+        ushort MaxHammingDistance);
 
     internal record ParsedSubmissionResponse(
         IReadOnlyList<ParsedImage> ParsedImages,
@@ -383,7 +312,6 @@ namespace DownloadRedditImages
         [property: JsonPropertyName("url")] Uri Uri);
     internal record MediaMetadata(
         [property: JsonPropertyName("e")] string MediaType,
-        [property: JsonPropertyName("m")] string ContentType,
         [property: JsonPropertyName("p")] IReadOnlyList<Media> Previews,
         [property: JsonPropertyName("s")] Media Source);
 
