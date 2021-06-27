@@ -53,7 +53,7 @@ This tool only downloads user images. If you need more than just user image down
 
 ## Troubleshooting
 
-- **On Linux, I get an error saying `Unable to load DLL 'libgdiplus'`**: Try running `apt-get install -y libgdiplus`, as described [here](https://github.com/dotnet/core/issues/2746#issuecomment-595980412), and try again.
+- **On Linux, I get an error saying `Unable to load DLL 'libgdiplus'`**: Run `apt-get install -y libgdiplus`, as described [here](https://github.com/dotnet/core/issues/2746#issuecomment-595980412), and try again.
 - **A user just posted a new image. I ran the tool, but the new image wasn't downloaded. Why?**: Reddit user posts are retrieved using Pushshift API, which lags behind live Reddit data by a few hours. Wait and try again?
 - **An error happened while downloading and the tool crashed. What do I do?**: Run the tool again. It will resume where it left off. If it dies repeatedly, file a bug.
 - **Does this download videos?**: No.
