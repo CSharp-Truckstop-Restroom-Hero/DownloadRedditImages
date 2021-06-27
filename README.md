@@ -42,6 +42,15 @@ Images which pass both hash filters are downloaded in full size. The image file 
 
 A `checkpoint.json` file is also written to the folder containing the images, and keeps track of the progress of the downloads.
 
+## Comparison with other tools
+
+This tool only downloads user images. If you need more than just user image downloads, there's lots of other great choices:
+
+- https://github.com/aliparlakci/bulk-downloader-for-reddit: Limited to 1000 most recent submissions, no perceptual duplicate filtering support (only file content duplicate filtering).
+- https://github.com/MalloyDelacroix/DownloaderForReddit: Limited to 1000 most recent submissions, no perceptual or file content duplicate filtering.
+- https://github.com/p-ranav/saveddit: Requires OAuth account credential setup, probably limited to 1000 most recent submissions (?), no perceptual or file content duplicate filtering.
+- https://github.com/shadowmoose/RedditDownloader: Does everything this tool does, and more. Uses a slightly lower-quality perceptual duplicate filter ([difference hash](http://www.hackerfactor.com/blog/index.php?/archives/529-Kind-of-Like-That.html)) than this tool (DCT-based pHash).
+
 ## Troubleshooting
 
 - **A user just posted a new image. I ran the tool, but the new image wasn't downloaded. Why?**: Reddit user posts are retrieved using Pushshift API, which lags behind live Reddit data by a few hours. Wait and try again?
