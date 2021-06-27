@@ -6,13 +6,13 @@ This CLI tool downloads a Reddit user's images, skipping duplicates along the wa
 
 ## How to use
 
-You'll need to get the tool, configure it, and run it.
+You'll need to download the tool, configure it (optional), and run it.
 
-### Get the tool
+### Download the tool
 
 Download and unzip [a release](https://github.com/CSharp-Truckstop-Restroom-Hero/DownloadRedditImages/releases) that matches your platform (Windows, Mac, or Linux).
 
-### Configure the tool
+### Configure the tool (optional)
 
 The file `appsettings.json` has two configuration settings:
 
