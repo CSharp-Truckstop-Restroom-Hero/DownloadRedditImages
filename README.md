@@ -16,7 +16,7 @@ Download and unzip [a release](https://github.com/CSharp-Truckstop-Restroom-Hero
 
 The file `appsettings.json` has two configuration settings:
 
-- `OutputDirectory`: Default is `.`, the current directory. Subfolders with each Reddit user's name will be created here, and images will be saved in them.
+- `DownloadDirectory`: Default is `.`, the current directory. Subfolders with each Reddit user's name will be created here, and images will be saved in them.
 - `MaxHammingDistance`: Default is 0, and must be a non-negative integer. Leaving this as 0 is fine for most purposes. The higher the number, the more aggressive the duplicate filtering will be, which can reduce the number of downloads, but increases the chances an image that you consider subjectively different from a previous download will be filtered out as a duplicate. 15 is probably too high.
 
 ### Run the tool

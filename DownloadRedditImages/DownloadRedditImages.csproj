@@ -10,6 +10,7 @@
 
     <ItemGroup>
       <PackageReference Include="Crc32.NET" Version="1.2.0" />
+      <PackageReference Include="MimeTypeMapOfficial" Version="1.0.17" />
       <PackageReference Include="Shipwreck.Phash" Version="0.5.0" />
       <PackageReference Include="Shipwreck.Phash.Bitmaps" Version="0.5.0" />
     </ItemGroup>

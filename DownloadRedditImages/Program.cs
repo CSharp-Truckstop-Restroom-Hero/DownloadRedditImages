@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Force.Crc32;
+using MimeTypes;
 using Shipwreck.Phash;
 using Shipwreck.Phash.Bitmaps;
 
@@ -22,12 +23,13 @@ namespace DownloadRedditImages
 
         private static Appsettings LoadAppsettings()
         {
-            var (outputDirectory, maxHammingDistance) = JsonSerializer.Deserialize<RawAppsettings>(File.ReadAllText(Path.Combine(
+            var (downloadDirectory, maxHammingDistance) = JsonSerializer.Deserialize<RawAppsettings>(File.ReadAllText(Path.Combine(
                 Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
                 "appsettings.json")));
-            return new Appsettings(new DirectoryInfo(outputDirectory), maxHammingDistance);
+            return new Appsettings(new DirectoryInfo(downloadDirectory), maxHammingDistance);
         }
 
+        // TODO: No-preview images
         private static async Task Main(string[] args)
         {
             if (args.Length == 0)
@@ -36,22 +38,42 @@ namespace DownloadRedditImages
                 return;
             }
 
-            if (!Appsettings.OutputDirectory.Exists)
+            if (!Appsettings.DownloadDirectory.Exists)
             {
-                Appsettings.OutputDirectory.Create();
+                try
+                {
+                    Appsettings.DownloadDirectory.Create();
+                }
+                catch (Exception e)
+                {
+                    Error($"Failed to create download directory {Appsettings.DownloadDirectory.FullName}.\n{e}");
+                    Environment.Exit(1);
+                }
             }
 
             foreach (var author in args)
             {
-                await Download(author);
+                try
+                {
+                    await Download(author);
+                }
+                catch (Exception e)
+                {
+                    Error($"An error occurred while downloading images for user \"{author}\". Please try again later. If this error occurs repeatedly, file a bug.\n{e}");
+                }
             }
         }
 
         private static async Task Download(string author)
         {
-            Info($"Downloading images for {author}.");
-            var (createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes) = LoadCheckpoint(author);
-            DirectoryInfo authorDirectory = new(Path.Combine(Appsettings.OutputDirectory.FullName, author));
+            Info($"Downloading images for user \"{author}\".");
+
+            var (createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, duplicateCount) = LoadCheckpoint(author);
+            DirectoryInfo authorDirectory = new(Path.Combine(Appsettings.DownloadDirectory.FullName, author));
+            var filenamesWithoutExtensions = Directory.GetFiles(authorDirectory.FullName)
+                .Select(Path.GetFileNameWithoutExtension)
+                .ToHashSet();
+
             while (true)
             {
                 var parsedSubmissionResponse = await Get(author, createdAfter);
@@ -81,6 +103,7 @@ namespace DownloadRedditImages
                     if (!castagnoliHashes.Add(castagnoliHash))
                     {
                         Info($"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        duplicateCount++;
                         continue;
                     }
 
@@ -88,12 +111,14 @@ namespace DownloadRedditImages
                     if (perceptualHashes.Contains(perceptualHash))
                     {
                         Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        duplicateCount++;
                         continue;
                     }
 
                     if (perceptualDuplicateHashes.Contains(perceptualHash))
                     {
                         Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {decodedSourceUri}");
+                        duplicateCount++;
                         continue;
                     }
 
@@ -101,14 +126,15 @@ namespace DownloadRedditImages
                     {
                         perceptualDuplicateHashes.Add(perceptualHash);
                         Info($"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
+                        duplicateCount++;
                         continue;
                     }
 
-                    var filePath = Path.Combine(authorDirectory.FullName, $"{perceptualHash} {castagnoliHash}.jpg");
-                    if (File.Exists(filePath))
+                    var filenameWithoutExtension = $"{perceptualHash} {castagnoliHash}";
+                    if (!filenamesWithoutExtensions.Add(filenameWithoutExtension))
                     {
                         perceptualHashes.Add(perceptualHash);
-                        Info($"Skipping download because {filePath} already exists.");
+                        Info($"Skipping download because {filenameWithoutExtension}.* is already present in {authorDirectory.FullName}.");
                         continue;
                     }
 
@@ -120,13 +146,20 @@ namespace DownloadRedditImages
                         continue;
                     }
 
+                    var filePath = Path.Combine(authorDirectory.FullName, filenameWithoutExtension + GetFileExtension(sourceResponse));
                     await File.WriteAllBytesAsync(filePath, await sourceResponse.Content.ReadAsByteArrayAsync());
                     perceptualHashes.Add(perceptualHash);
                     Info($"Saved {decodedSourceUri} to {filePath}");
                 }
-                WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes));
+                WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, duplicateCount));
             }
+            Info($"Finished downloading images for user \"{author}\". This user has {duplicateCount} duplicate images.");
         }
+
+        private static string GetFileExtension(HttpResponseMessage httpResponseMessage) =>
+            httpResponseMessage.Content.Headers.TryGetValues("Content-Type", out var values) && values.Count() == 1
+                ? MimeTypeMap.GetExtension(values.Single())
+                : ".jpg";
 
         private static bool IsPerceptualDuplicate(
             ulong perceptualHash,
@@ -136,9 +169,10 @@ namespace DownloadRedditImages
         {
             foreach (var existingPerceptualHash in perceptualHashes)
             {
-                hammingDistance = ImagePhash.GetHammingDistance(perceptualHash, existingPerceptualHash);
-                if (hammingDistance <= Appsettings.MaxHammingDistance)
+                var currentHammingDistance = ImagePhash.GetHammingDistance(perceptualHash, existingPerceptualHash);
+                if (currentHammingDistance <= Appsettings.MaxHammingDistance)
                 {
+                    hammingDistance = currentHammingDistance;
                     perceptualDuplicateOf = existingPerceptualHash;
                     return true;
                 }
@@ -152,7 +186,8 @@ namespace DownloadRedditImages
         private static ulong PerceptualHash(byte[] imageContent)
         {
             using var previewResponseStream = new MemoryStream(imageContent);
-            return ImagePhash.ComputeDctHash(((Bitmap) System.Drawing.Image.FromStream(previewResponseStream)).ToLuminanceImage());
+            using var bitmap = (Bitmap) System.Drawing.Image.FromStream(previewResponseStream);
+            return ImagePhash.ComputeDctHash(bitmap.ToLuminanceImage());
         }
 
         private static async Task<ParsedSubmissionResponse> Get(string author, int createdAfter)
@@ -230,7 +265,7 @@ namespace DownloadRedditImages
 
         private static Checkpoint LoadCheckpoint(string author)
         {
-            DirectoryInfo authorDirectory = new(Path.Combine(Appsettings.OutputDirectory.FullName, author));
+            DirectoryInfo authorDirectory = new(Path.Combine(Appsettings.DownloadDirectory.FullName, author));
             if (!authorDirectory.Exists)
             {
                 authorDirectory.Create();
@@ -245,7 +280,7 @@ namespace DownloadRedditImages
                 return checkpoint;
             }
 
-            return new Checkpoint(0, new HashSet<uint>(), new HashSet<ulong>(), new HashSet<ulong>());
+            return new Checkpoint(0, new HashSet<uint>(), new HashSet<ulong>(), new HashSet<ulong>(), 0);
         }
 
         private static void WriteCheckpoint(
@@ -253,7 +288,7 @@ namespace DownloadRedditImages
             Checkpoint checkpoint)
         {
             File.WriteAllText(
-                Path.Combine(Appsettings.OutputDirectory.FullName, author, "checkpoint.json"),
+                Path.Combine(Appsettings.DownloadDirectory.FullName, author, "checkpoint.json"),
                 JsonSerializer.Serialize(checkpoint));
         }
 
@@ -277,14 +312,15 @@ namespace DownloadRedditImages
         int NewestCreated,
         HashSet<uint> CastagnoliHashes,
         HashSet<ulong> PerceptualHashes,
-        HashSet<ulong> PerceptualDuplicateHashes);
+        HashSet<ulong> PerceptualDuplicateHashes,
+        int DuplicateCount);
 
     internal record Appsettings(
-        DirectoryInfo OutputDirectory,
+        DirectoryInfo DownloadDirectory,
         ushort MaxHammingDistance);
 
     internal record RawAppsettings(
-        string OutputDirectory,
+        string DownloadDirectory,
         ushort MaxHammingDistance);
 
     internal record ParsedSubmissionResponse(
