@@ -21,15 +21,6 @@ namespace DownloadRedditImages
         private static readonly HttpClient HttpClient = new();
         private static readonly Appsettings Appsettings = LoadAppsettings();
 
-        private static Appsettings LoadAppsettings()
-        {
-            var (downloadDirectory, maxHammingDistance) = JsonSerializer.Deserialize<RawAppsettings>(File.ReadAllText(Path.Combine(
-                Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
-                "appsettings.json")));
-            return new Appsettings(new DirectoryInfo(downloadDirectory), maxHammingDistance);
-        }
-
-        // TODO: No-preview images
         private static async Task Main(string[] args)
         {
             if (args.Length == 0)
@@ -77,7 +68,7 @@ namespace DownloadRedditImages
             while (true)
             {
                 var parsedSubmissionResponse = await Get(author, createdAfter);
-                if (parsedSubmissionResponse == null)
+                if (parsedSubmissionResponse is null)
                 {
                     Info("All submissions have been downloaded.");
                     break;
@@ -86,14 +77,12 @@ namespace DownloadRedditImages
                 createdAfter = parsedSubmissionResponse.NewestCreated;
                 var parsedImages = parsedSubmissionResponse.ParsedImages;
                 Info($"Detecting duplicates in {parsedImages.Count} images...");
-                foreach (var parsedImage in parsedImages)
+                foreach (var (sourceUri, previewUri) in parsedImages)
                 {
-                    var decodedPreviewUri = WebUtility.HtmlDecode(parsedImage.PreviewUri.ToString());
-                    var decodedSourceUri = WebUtility.HtmlDecode(parsedImage.SourceUri.ToString());
-                    using var previewResponse = await HttpClient.GetAsync(decodedPreviewUri);
+                    using var previewResponse = await HttpClient.GetAsync(previewUri ?? sourceUri);
                     if (!previewResponse.IsSuccessStatusCode)
                     {
-                        Error($"Skipping download of {decodedSourceUri} because the preview {decodedPreviewUri} returned status code {previewResponse.StatusCode}.");
+                        Error($"Skipping download of {sourceUri} because the preview {previewUri ?? sourceUri} returned status code {previewResponse.StatusCode}.");
                         continue;
                     }
 
@@ -102,7 +91,7 @@ namespace DownloadRedditImages
                     var castagnoliHash = Crc32CAlgorithm.Compute(previewResponseBytes);
                     if (!castagnoliHashes.Add(castagnoliHash))
                     {
-                        Info($"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        Info($"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {sourceUri}");
                         duplicateCount++;
                         continue;
                     }
@@ -110,14 +99,14 @@ namespace DownloadRedditImages
                     var perceptualHash = PerceptualHash(previewResponseBytes);
                     if (perceptualHashes.Contains(perceptualHash))
                     {
-                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {decodedSourceUri}");
+                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {sourceUri}");
                         duplicateCount++;
                         continue;
                     }
 
                     if (perceptualDuplicateHashes.Contains(perceptualHash))
                     {
-                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {decodedSourceUri}");
+                        Info($"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {sourceUri}");
                         duplicateCount++;
                         continue;
                     }
@@ -125,7 +114,7 @@ namespace DownloadRedditImages
                     if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var hammingDistance, out var perceptualDuplicateOf))
                     {
                         perceptualDuplicateHashes.Add(perceptualHash);
-                        Info($"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {decodedSourceUri}");
+                        Info($"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {sourceUri}");
                         duplicateCount++;
                         continue;
                     }
@@ -138,26 +127,48 @@ namespace DownloadRedditImages
                         continue;
                     }
 
-                    var sourceResponse = await HttpClient.GetAsync(decodedSourceUri);
-                    if (!sourceResponse.IsSuccessStatusCode)
+                    byte[]? sourceResponseBytes;
+                    string? extension;
+                    if (previewUri is not null)
                     {
-                        Error($"Failed to download {decodedPreviewUri}, status code {sourceResponse.StatusCode}");
-                        castagnoliHashes.Remove(castagnoliHash);
-                        continue;
+                        using var sourceResponse = await HttpClient.GetAsync(sourceUri);
+                        if (!sourceResponse.IsSuccessStatusCode)
+                        {
+                            Error($"Failed to download {sourceUri}, status code {sourceResponse.StatusCode}");
+                            castagnoliHashes.Remove(castagnoliHash);
+                            continue;
+                        }
+
+                        sourceResponseBytes = await sourceResponse.Content.ReadAsByteArrayAsync();
+                        extension = GetFileExtension(sourceResponse);
+                    }
+                    else
+                    {
+                        sourceResponseBytes = previewResponseBytes;
+                        extension = GetFileExtension(previewResponse);
                     }
 
-                    var filePath = Path.Combine(authorDirectory.FullName, filenameWithoutExtension + GetFileExtension(sourceResponse));
-                    await File.WriteAllBytesAsync(filePath, await sourceResponse.Content.ReadAsByteArrayAsync());
+                    var filePath = Path.Combine(authorDirectory.FullName, filenameWithoutExtension + extension);
+                    await File.WriteAllBytesAsync(filePath, sourceResponseBytes);
                     perceptualHashes.Add(perceptualHash);
-                    Info($"Saved {decodedSourceUri} to {filePath}");
+                    Info($"Saved {sourceUri} to {filePath}");
                 }
                 WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, duplicateCount));
             }
             Info($"Finished downloading images for user \"{author}\". This user has {duplicateCount} duplicate images.");
         }
 
+        private static Appsettings LoadAppsettings()
+        {
+            var json = File.ReadAllText(Path.Combine(
+                Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
+                "appsettings.json"));
+            var (downloadDirectory, maxHammingDistance) = JsonSerializer.Deserialize<RawAppsettings>(json)!;
+            return new Appsettings(new DirectoryInfo(downloadDirectory), maxHammingDistance);
+        }
+
         private static string GetFileExtension(HttpResponseMessage httpResponseMessage) =>
-            httpResponseMessage.Content.Headers.TryGetValues("Content-Type", out var values) && values.Count() == 1
+            httpResponseMessage.Content.Headers.TryGetValues("Content-Type", out var values)
                 ? MimeTypeMap.GetExtension(values.Single())
                 : ".jpg";
 
@@ -190,77 +201,88 @@ namespace DownloadRedditImages
             return ImagePhash.ComputeDctHash(bitmap.ToLuminanceImage());
         }
 
-        private static async Task<ParsedSubmissionResponse> Get(string author, int createdAfter)
+        private static async Task<ParsedSubmissionResponse?> Get(string author, int createdAfter)
         {
             Info($"Getting submissions after {DateTimeOffset.FromUnixTimeSeconds(createdAfter)}.");
             var response = await HttpClient.GetStringAsync(GetUriFor(author, createdAfter));
             var submissionResponse = JsonSerializer.Deserialize<SubmissionResponse>(response);
-            if (submissionResponse!.Data.Count == 0)
+            if (submissionResponse?.Data is null || submissionResponse.Data.Count == 0)
             {
                 return null;
             }
+
+            var newestCreated = submissionResponse.Data.Max(s => s.Created!.Value);
+
             List<ParsedImage> parsedImages = new();
-            var newestCreated = submissionResponse.Data.Max(s => s.Created);
             foreach (var submission in submissionResponse.Data)
             {
-                var media1Parsed = submission?.MediaVariant1?.Images
-                   ?.Select(Parse)
-                   ?.Where(p => p != null)
-                   ?.ToList()
-                   ?? new List<ParsedImage>();
-                var media2Parsed = submission?.MediaVariant2?.Values
-                   ?.Select(Parse)
-                   ?.Where(p => p != null)
-                   ?.ToList()
-                   ?? new List<ParsedImage>();
-                var mediaParsed = media1Parsed.Concat(media2Parsed).ToList();
-                if (mediaParsed.Any())
+                var count = parsedImages.Count;
+
+                parsedImages.AddRange(Parse(submission.MediaVariant1?.Images, submission.Uri));
+                parsedImages.AddRange(Parse(submission.MediaVariant2?.Values, submission.Uri));
+
+                if (parsedImages.Count == count)
                 {
-                    parsedImages.AddRange(mediaParsed);
-                }
-                else
-                {
-                    Info($"Found no images in post {submission?.Uri}");
+                    Info($"Found no images in post {submission.Uri}");
                 }
             }
 
             return new ParsedSubmissionResponse(parsedImages, newestCreated);
         }
 
-        private static ParsedImage Parse(ImageMetadata imageMetadata)
+        private static IEnumerable<ParsedImage> Parse<TImage>(IEnumerable<IImageMetadata<TImage>>? imageMetadatas, Uri submissionUri)
+        where TImage : IImage
         {
-            if (imageMetadata.Source?.Uri != null)
+            if (imageMetadatas is null)
             {
-                var minPreview = imageMetadata?.Previews
-                    ?.Where(p => p.Height * p.Width > 0)
-                    ?.OrderBy(p => p.Height * p.Width)
-                    ?.FirstOrDefault()
-                    ?.Uri;
-                if (minPreview != null)
+                yield break;
+            }
+
+            foreach (var imageMetadata in imageMetadatas)
+            {
+                var parsedImage = Parse(imageMetadata, submissionUri);
+                if (parsedImage is not null)
                 {
-                    return new ParsedImage(imageMetadata.Source.Uri, minPreview);
+                    yield return parsedImage;
                 }
             }
-            Error($"Rejecting invalid ImageMetadata: {JsonSerializer.Serialize(imageMetadata)}");
-            return null;
         }
 
-        private static ParsedImage Parse(MediaMetadata mediaMetadata)
+        private static ParsedImage? Parse<TImage>(IImageMetadata<TImage> imageMetadata, Uri submissionUri)
+        where TImage : IImage
         {
-            if (mediaMetadata.Source?.Uri != null && mediaMetadata.MediaType == "Image")
+            if (submissionUri == new Uri("https://www.reddit.com/gallery/n22rbk"))
             {
-                var minPreview = mediaMetadata?.Previews
-                    ?.Where(p => p.Height * p.Width > 0)
-                    ?.OrderBy(p => p.Height * p.Width)
-                    ?.FirstOrDefault()
-                    ?.Uri;
-                if (minPreview != null)
-                {
-                    return new ParsedImage(mediaMetadata.Source.Uri, minPreview);
-                }
+                Console.WriteLine();
             }
-            Error($"Rejecting invalid MediaMetadata: {JsonSerializer.Serialize(mediaMetadata)}");
-            return null;
+            if (imageMetadata.Source?.Uri is null)
+            {
+                Warn($"Rejecting an invalid media from post {submissionUri} because it has no source image: {JsonSerializer.Serialize(imageMetadata)}");
+                return null;
+            }
+
+            // Note: Reddit sometimes returns image URLs with HTML encoded ampersands, like https://preview.redd.it/yp20vnw3fdw61.jpg?width=108&amp;crop=smart&amp;auto=webp&amp;s=31797b476190709566e62deb9a26ddc5e2ee3f58, so this fixes those URLs
+            var sourceUri = new Uri(WebUtility.HtmlDecode(imageMetadata.Source.Uri.ToString()));
+
+            if (imageMetadata is MediaMetadata mediaMetadata && mediaMetadata.MediaType != "Image")
+            {
+                Warn($"Rejecting {sourceUri} from post {submissionUri} because its media type was {mediaMetadata.MediaType} instead of \"Image\".");
+                return null;
+            }
+
+            var smallestPreview = imageMetadata.Previews
+                ?.Where(p => p.Height * p.Width > 0)
+                .OrderBy(p => p.Height * p.Width)
+                .FirstOrDefault()
+                ?.Uri;
+            if (smallestPreview is null)
+            {
+                Warn($"An image in post {submissionUri} does not have a preview image. Falling back to using the source image {sourceUri} instead. This may reduce performance. If you see this warning constantly, file a bug.");
+                return new ParsedImage(sourceUri, null);
+            }
+
+            var previewUri = new Uri(WebUtility.HtmlDecode(smallestPreview.ToString()));
+            return new ParsedImage(sourceUri, previewUri);
         }
 
         private static Checkpoint LoadCheckpoint(string author)
@@ -275,7 +297,8 @@ namespace DownloadRedditImages
 
             if (checkpointFile.Exists)
             {
-                var checkpoint = JsonSerializer.Deserialize<Checkpoint>(File.ReadAllText(checkpointFile.FullName));
+                var json = File.ReadAllText(checkpointFile.FullName);
+                var checkpoint = JsonSerializer.Deserialize<Checkpoint>(json) ?? throw new Exception($"Failed to deserialize {json} into Checkpoint.");
                 Info($"Resuming from checkpoint timestamp {DateTimeOffset.FromUnixTimeSeconds(checkpoint.NewestCreated)}");
                 return checkpoint;
             }
@@ -299,6 +322,15 @@ namespace DownloadRedditImages
             Console.Write("ERROR");
             Console.ResetColor();
             Console.WriteLine($"]: {error}");
+        }
+
+        private static void Warn(string warn)
+        {
+            Console.Write('[');
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write("WARN");
+            Console.ResetColor();
+            Console.WriteLine($"]: {warn}");
         }
 
         private static void Info(string info) =>
@@ -329,37 +361,50 @@ namespace DownloadRedditImages
 
     internal record ParsedImage(
         Uri SourceUri,
-        Uri PreviewUri);
+        Uri? PreviewUri);
 
     internal record SubmissionResponse(
-        [property: JsonPropertyName("data")] IReadOnlyList<Submission> Data);
+        [property: JsonPropertyName("data")] IReadOnlyList<Submission>? Data);
 
     internal record Submission(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("created_utc")] int Created,
-        [property: JsonPropertyName("media_metadata")] Dictionary<string, MediaMetadata> MediaVariant2,
-        [property: JsonPropertyName("preview")] Preview MediaVariant1,
+        [property: JsonPropertyName("id")] string? Id,
+        [property: JsonPropertyName("created_utc")] int? Created,
+        [property: JsonPropertyName("media_metadata")] Dictionary<string, MediaMetadata>? MediaVariant2,
+        [property: JsonPropertyName("preview")] Preview? MediaVariant1,
         [property: JsonPropertyName("url")] Uri Uri);
 
     internal record Preview(
-        [property: JsonPropertyName("images")] IReadOnlyList<ImageMetadata> Images);
+        [property: JsonPropertyName("images")] IReadOnlyList<ImageMetadata>? Images);
 
     internal record ImageMetadata(
-        [property: JsonPropertyName("resolutions")] IReadOnlyList<Image> Previews,
-        [property: JsonPropertyName("source")] Image Source);
+        [property: JsonPropertyName("resolutions")] IReadOnlyList<Image>? Previews,
+        [property: JsonPropertyName("source")] Image? Source) : IImageMetadata<Image>;
 
     internal record Image(
-        [property: JsonPropertyName("height")] int Height,
-        [property: JsonPropertyName("width")] int Width,
-        [property: JsonPropertyName("url")] Uri Uri);
+        [property: JsonPropertyName("height")] uint? Height,
+        [property: JsonPropertyName("width")] uint? Width,
+        [property: JsonPropertyName("url")] Uri? Uri) : IImage;
+
+    internal interface IImageMetadata<out TImage> where TImage : IImage
+    {
+        IReadOnlyList<TImage>? Previews { get; }
+        TImage? Source { get; }
+    }
+
+    internal interface IImage
+    {
+        Uri? Uri { get; }
+        uint? Width { get; }
+        uint? Height { get; }
+    }
 
     internal record MediaMetadata(
-        [property: JsonPropertyName("e")] string MediaType,
-        [property: JsonPropertyName("p")] IReadOnlyList<Media> Previews,
-        [property: JsonPropertyName("s")] Media Source);
+        [property: JsonPropertyName("e")] string? MediaType,
+        [property: JsonPropertyName("p")] IReadOnlyList<Media>? Previews,
+        [property: JsonPropertyName("s")] Media? Source) : IImageMetadata<Media>;
 
     internal record Media(
-        [property: JsonPropertyName("u")] Uri Uri,
-        [property: JsonPropertyName("x")] uint Width,
-        [property: JsonPropertyName("y")] uint Height);
+        [property: JsonPropertyName("u")] Uri? Uri,
+        [property: JsonPropertyName("x")] uint? Width,
+        [property: JsonPropertyName("y")] uint? Height) : IImage;
 }
