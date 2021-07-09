@@ -6,6 +6,8 @@
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <OutputType>Exe</OutputType>
         <Nullable>enable</Nullable>
+        <PackAsTool>true</PackAsTool>
+        <Version>1.1.0</Version>
     </PropertyGroup>
 
     <ItemGroup>

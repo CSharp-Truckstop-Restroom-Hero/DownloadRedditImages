@@ -7,8 +7,8 @@ using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using DownloadRedditImages.Reddit;
 using Force.Crc32;
 using MimeTypes;
 using Shipwreck.Phash;
@@ -25,7 +25,7 @@ namespace DownloadRedditImages
         {
             if (args.Length == 0)
             {
-                Info("Pass a space-separated list of usernames as input. Images for each user will be downloaded to the directory specified in appsettings.json.");
+                Info("Pass a space-separated list of usernames as input. Images for each user will be downloaded to the directory specified in appsettings.json. Alternately, pass \"All\" as an argument to update all previously downloaded authors in the download directory.");
                 return;
             }
 
@@ -40,6 +40,14 @@ namespace DownloadRedditImages
                     Error($"Failed to create download directory {Appsettings.DownloadDirectory.FullName}.\n{e}");
                     Environment.Exit(1);
                 }
+            }
+
+            if (args.Length == 1 && args[0].Equals("all", StringComparison.OrdinalIgnoreCase))
+            {
+                args = Appsettings.DownloadDirectory.GetDirectories()
+                    .Where(d => File.Exists(Path.Combine(d.FullName, "checkpoint.json")))
+                    .Select(d => d.Name)
+                    .ToArray();
             }
 
             foreach (var author in args)
@@ -358,49 +366,4 @@ namespace DownloadRedditImages
     internal record ParsedImage(
         Uri SourceUri,
         Uri? PreviewUri);
-
-    internal record SubmissionResponse(
-        [property: JsonPropertyName("data")] IReadOnlyList<Submission>? Data);
-
-    internal record Submission(
-        [property: JsonPropertyName("id")] string? Id,
-        [property: JsonPropertyName("created_utc")] int? Created,
-        [property: JsonPropertyName("media_metadata")] Dictionary<string, MediaMetadata>? MediaVariant2,
-        [property: JsonPropertyName("preview")] Preview? MediaVariant1,
-        [property: JsonPropertyName("url")] Uri Uri);
-
-    internal record Preview(
-        [property: JsonPropertyName("images")] IReadOnlyList<ImageMetadata>? Images);
-
-    internal record ImageMetadata(
-        [property: JsonPropertyName("resolutions")] IReadOnlyList<Image>? Previews,
-        [property: JsonPropertyName("source")] Image? Source) : IImageMetadata<Image>;
-
-    internal record Image(
-        [property: JsonPropertyName("height")] uint? Height,
-        [property: JsonPropertyName("width")] uint? Width,
-        [property: JsonPropertyName("url")] Uri? Uri) : IImage;
-
-    internal interface IImageMetadata<out TImage> where TImage : IImage
-    {
-        IReadOnlyList<TImage>? Previews { get; }
-        TImage? Source { get; }
-    }
-
-    internal interface IImage
-    {
-        Uri? Uri { get; }
-        uint? Width { get; }
-        uint? Height { get; }
-    }
-
-    internal record MediaMetadata(
-        [property: JsonPropertyName("e")] string? MediaType,
-        [property: JsonPropertyName("p")] IReadOnlyList<Media>? Previews,
-        [property: JsonPropertyName("s")] Media? Source) : IImageMetadata<Media>;
-
-    internal record Media(
-        [property: JsonPropertyName("u")] Uri? Uri,
-        [property: JsonPropertyName("x")] uint? Width,
-        [property: JsonPropertyName("y")] uint? Height) : IImage;
 }
