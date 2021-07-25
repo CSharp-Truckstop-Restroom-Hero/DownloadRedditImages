@@ -14,10 +14,12 @@ Download and unzip [a release](https://github.com/CSharp-Truckstop-Restroom-Hero
 
 ### Configure the tool (optional)
 
-The file `appsettings.json` has two configuration settings:
+The file `appsettings.json` has four configuration settings:
 
 - `DownloadDirectory`: Default is `.`, the current directory. Subfolders with each Reddit user's name will be created here, and images will be saved in them.
 - `MaxHammingDistance`: Default is 0, and must be a non-negative integer. Leaving this as 0 is fine for most purposes. The higher the number, the more aggressive the duplicate filtering will be, which can reduce the number of downloads, but increases the chances an image that you consider subjectively different from a previous download will be filtered out as a duplicate. 15 is probably too high.
+- `MaxParallelism`: Default is 4. Must be at least 1. Setting higher than 1 parallelizes image fetches. Beyond about 4-8, offers no speed increase, because Pushshift API metadata fetches, which are not parallelized, become a bottleneck.
+- `MinimumLogEventLevel`: Default is `Information`. Controls log verbosity. Possible values are `Verbose`, `Debug`, `Information`, `Warning`, `Error`, and `Fatal`.
 
 ### Run the tool
 
@@ -27,9 +29,15 @@ Pass 1 or more Reddit usernames as arguments to the executable, separated by spa
 DownloadRedditImages.exe dmishin
 ```
 
-It will log as it downloads images.
+It will download images to the directory `{DownloadDirectory}/{username}`, creating it if it does not already exist.
 
 If you run the tool again, it will intelligently skip re-downloading images that were already downloaded, and only download new images since the last run.
+
+There is also a convenience `all` argument to run for all users in the download directory, allowing for easy updates:
+
+```
+DownloadRedditImages.exe all
+```
 
 ## How it works
 
