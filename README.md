@@ -67,6 +67,8 @@ This tool only downloads user images. If you need more than just user image down
 - **Does this download videos?**: No.
 - **Pushshift API is down. This tool no longer works. What do I do?**: `git commit -m suicide`
 
+There is a known bug where it's possible to download two or more images with distinct perceptual hashes which are within MaxHammingDistance of each other, rather than the expected behavior of only keeping one. This can only happen if MaxParallelism >= 2, MaxHammingDistance >= 1, and the images are downloaded at the exact same time, so it should be rare.
+
 ## Publishing a new release
 
 Requires the .NET 5 SDK. Run this:

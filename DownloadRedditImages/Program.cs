@@ -16,7 +16,6 @@ using DownloadRedditImages.Reddit;
 using Force.Crc32;
 using MimeTypes;
 using Serilog;
-using Serilog.Core;
 using Serilog.Events;
 using Shipwreck.Phash;
 using Shipwreck.Phash.Bitmaps;
@@ -87,12 +86,22 @@ namespace DownloadRedditImages
             var imagesCount = 0;
             var stopwatch = Stopwatch.StartNew();
 
-            var (createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, duplicateCount) = LoadCheckpoint(author);
+            var (
+                createdAfter,
+                castagnoliHashes,
+                perceptualHashes,
+                perceptualDuplicateHashes,
+                duplicateCount) = LoadCheckpoint(author);
+            var castagnoliHashset = castagnoliHashes.ToConcurrentDictionary();
+            var perceptualHashset = perceptualHashes.ToConcurrentDictionary();
+            var perceptualDuplicateHashset = perceptualDuplicateHashes.ToConcurrentDictionary();
             var duplicates = new Duplicates(duplicateCount);
             DirectoryInfo authorDirectory = new(Path.Combine(Appsettings.DownloadDirectory.FullName, author));
             var filenamesWithoutExtensions = Directory.GetFiles(authorDirectory.FullName)
-                .Select(Path.GetFileNameWithoutExtension)
-                .ToHashSet();
+                .Select(p => Path.GetFileNameWithoutExtension(p)!)
+                .ToConcurrentDictionary();
+            var castagnoliHashLock = new KeyedLock<uint>();
+            var perceptualHashLock = new KeyedLock<ulong>();
 
             var parsedSubmissionResponse = await Get(author, createdAfter);
             while (true)
@@ -107,17 +116,24 @@ namespace DownloadRedditImages
                 var parsedImages = new ConcurrentQueue<ParsedImage>(parsedSubmissionResponse.ParsedImages);
                 imagesCount += parsedImages.Count;
                 Log.Information($"Detecting duplicates in {parsedImages.Count} images...");
-                // var castagnoliHashLock = new KeyedLock<uint>();
-                // var perceptualHashLock = new KeyedLock<ulong>();
                 var nextSubmissionResponse = Get(author, createdAfter);
                 var tasks = new List<Task> { nextSubmissionResponse };
                 for (var i = 0; i < Appsettings.MaxParallelism; i++)
                 {
-                    tasks.Add(DownloadImages(parsedImages, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, filenamesWithoutExtensions, authorDirectory, duplicates));
+                    tasks.Add(DownloadImages(
+                        parsedImages,
+                        castagnoliHashset,
+                        perceptualHashset,
+                        perceptualDuplicateHashset,
+                        filenamesWithoutExtensions,
+                        authorDirectory,
+                        duplicates,
+                        castagnoliHashLock,
+                        perceptualHashLock));
                 }
 
                 await Task.WhenAll(tasks);
-                WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashes, perceptualHashes, perceptualDuplicateHashes, duplicates.Count));
+                WriteCheckpoint(author, new Checkpoint(createdAfter, castagnoliHashset.Keys, perceptualHashset.Keys, perceptualDuplicateHashset.Keys, duplicates.Count));
                 parsedSubmissionResponse = nextSubmissionResponse.Result;
                 Log.Information($"Average image fetch rate: {imagesCount / stopwatch.Elapsed.TotalSeconds} images/second.");
             }
@@ -126,17 +142,19 @@ namespace DownloadRedditImages
 
         private static async Task DownloadImages(
             ConcurrentQueue<ParsedImage> parsedImages,
-            HashSet<uint> castagnoliHashes,
-            HashSet<ulong> perceptualHashes,
-            HashSet<ulong> perceptualDuplicateHashes,
-            HashSet<string?> filenamesWithoutExtensions,
+            ConcurrentDictionary<uint, bool> castagnoliHashes,
+            ConcurrentDictionary<ulong, bool> perceptualHashes,
+            ConcurrentDictionary<ulong, bool> perceptualDuplicateHashes,
+            ConcurrentDictionary<string, bool> filenamesWithoutExtensions,
             DirectoryInfo authorDirectory,
-            Duplicates duplicates)
+            Duplicates duplicates,
+            KeyedLock<uint> castagnoliHashLock,
+            KeyedLock<ulong> perceptualHashLock)
         {
             while (parsedImages.TryDequeue(out var parsedImage))
             {
                 var (sourceUri, previewUri) = parsedImage;
-                using var previewResponse = await HttpClient.GetAsync(previewUri ?? sourceUri);
+                using var previewResponse = await GetWithRetry(previewUri ?? sourceUri);
                 if (!previewResponse.IsSuccessStatusCode)
                 {
                     Log.Error(
@@ -147,70 +165,64 @@ namespace DownloadRedditImages
                 var previewResponseBytes = await previewResponse.Content.ReadAsByteArrayAsync();
 
                 var castagnoliHash = Crc32CAlgorithm.Compute(previewResponseBytes);
-                // using var l1 = await castagnoliHashLock.WaitAsync(castagnoliHash);
-                // Case 1: Different hashes, both go through
-                // Case 2: Same hash, one goes through, other returns
-                lock (castagnoliHashes)
+                using var lock1 = await castagnoliHashLock.WaitAsync(castagnoliHash);
+                if (!castagnoliHashes.TryAdd(castagnoliHash, true))
                 {
-                    if (!castagnoliHashes.Add(castagnoliHash))
-                    {
-                        Log.Debug(
-                            $"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {sourceUri}");
-                        duplicates.Increment();
-                        continue;
-                    }
+                    Log.Debug(
+                        $"Duplicate image ignored because it had the same Castagnoli hash ({castagnoliHash}) as a previously-downloaded image: {sourceUri}");
+                    duplicates.Increment();
+                    continue;
+                }
+                var perceptualHash = PerceptualHash(previewResponseBytes);
+                using var lock2 = await perceptualHashLock.WaitAsync(perceptualHash);
+                if (perceptualHashes.ContainsKey(perceptualHash))
+                {
+                    Log.Debug(
+                        $"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {sourceUri}");
+                    duplicates.Increment();
+                    continue;
                 }
 
-                var perceptualHash = PerceptualHash(previewResponseBytes);
-                // using var l2 = await perceptualHashLock.WaitAsync(perceptualHash);
-                string? filenameWithoutExtension;
-                lock (perceptualHashes)
+                if (perceptualDuplicateHashes.ContainsKey(perceptualHash))
                 {
-                    if (perceptualHashes.Contains(perceptualHash))
-                    {
-                        Log.Debug(
-                            $"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previously-downloaded image: {sourceUri}");
-                        duplicates.Increment();
-                        continue;
-                    }
+                    Log.Debug(
+                        $"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {sourceUri}");
+                    duplicates.Increment();
+                    continue;
+                }
 
-                    if (perceptualDuplicateHashes.Contains(perceptualHash))
-                    {
-                        Log.Debug(
-                            $"Duplicate image ignored because it had the same perceptual hash ({perceptualHash}) as a previous near-duplicate that was ignored: {sourceUri}");
-                        duplicates.Increment();
-                        continue;
-                    }
+                if (IsPerceptualDuplicate(perceptualHash, perceptualHashes.Keys, out var hammingDistance,
+                    out var perceptualDuplicateOf))
+                {
+                    perceptualDuplicateHashes.TryAdd(perceptualHash, true);
+                    Log.Debug(
+                        $"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {sourceUri}");
+                    duplicates.Increment();
+                    continue;
+                }
 
-                    if (IsPerceptualDuplicate(perceptualHash, perceptualHashes, out var hammingDistance,
-                        out var perceptualDuplicateOf))
-                    {
-                        perceptualDuplicateHashes.Add(perceptualHash);
-                        Log.Debug(
-                            $"Near-duplicate image ignored because it was within Hamming distance {hammingDistance} of a previously-downloaded image with perceptual hash {perceptualDuplicateOf}: {sourceUri}");
-                        duplicates.Increment();
-                        continue;
-                    }
+                perceptualHashes.TryAdd(perceptualHash, true);
 
-                    perceptualHashes.Add(perceptualHash);
-
-                    filenameWithoutExtension = $"{perceptualHash} {castagnoliHash}";
-                    if (!filenamesWithoutExtensions.Add(filenameWithoutExtension))
-                    {
-                        Log.Debug(
-                            $"Skipping download because {filenameWithoutExtension}.* is already present in {authorDirectory.FullName}.");
-                        continue;
-                    }
+                var filenameWithoutExtension = $"{perceptualHash} {castagnoliHash}";
+                if (!filenamesWithoutExtensions.TryAdd(filenameWithoutExtension, true))
+                {
+                    Log.Debug(
+                        $"Skipping download because {filenameWithoutExtension}.* is already present in {authorDirectory.FullName}.");
+                    continue;
                 }
 
                 byte[]? sourceResponseBytes;
                 string? extension;
                 if (previewUri is not null)
                 {
-                    using var sourceResponse = await HttpClient.GetAsync(sourceUri);
+                    using var sourceResponse = await GetWithRetry(sourceUri);
                     if (!sourceResponse.IsSuccessStatusCode)
                     {
-                        throw new Exception($"Failed to download {sourceUri}, status code {sourceResponse.StatusCode}");
+                        Log.Error($"Failed to download {sourceUri}, status code {sourceResponse.StatusCode}");
+                        castagnoliHashes.TryRemove(castagnoliHash, out _);
+                        perceptualHashes.TryRemove(perceptualHash, out _);
+                        filenamesWithoutExtensions.TryRemove(filenameWithoutExtension, out _);
+                        continue;
                     }
 
                     sourceResponseBytes = await sourceResponse.Content.ReadAsByteArrayAsync();
@@ -225,6 +237,21 @@ namespace DownloadRedditImages
                 var filePath = Path.Combine(authorDirectory.FullName, filenameWithoutExtension + extension);
                 await File.WriteAllBytesAsync(filePath, sourceResponseBytes);
                 Log.Information($"Saved {sourceUri} to {filePath}");
+            }
+        }
+
+        private static async Task<HttpResponseMessage> GetWithRetry(Uri uri)
+        {
+            var count = 1;
+            while (true)
+            {
+                var response = await HttpClient.GetAsync(uri);
+                if ((int) response.StatusCode < 500 || count >= 3)
+                {
+                    return response;
+                }
+                Log.Warning($"Request to {uri} failed with status code {response.StatusCode}. Attempting retry. Response body: {await response.Content.ReadAsStringAsync()}");
+                count++;
             }
         }
 
@@ -260,7 +287,7 @@ namespace DownloadRedditImages
 
         private static bool IsPerceptualDuplicate(
             ulong perceptualHash,
-            HashSet<ulong> perceptualHashes,
+            IEnumerable<ulong> perceptualHashes,
             out int? hammingDistance,
             out ulong? perceptualDuplicateOf)
         {
@@ -406,13 +433,16 @@ namespace DownloadRedditImages
 
         private static Uri GetUriFor(string author, int createdAfter) =>
             new($"https://api.pushshift.io/reddit/search/submission?author={author}&after={createdAfter}&size=100");
+
+        private static ConcurrentDictionary<TKey, bool> ToConcurrentDictionary<TKey>(this IEnumerable<TKey> keys) where TKey : notnull =>
+            new(keys.Select(key => KeyValuePair.Create(key, true)));
     }
 
     internal record Checkpoint(
         int NewestCreated,
-        HashSet<uint> CastagnoliHashes,
-        HashSet<ulong> PerceptualHashes,
-        HashSet<ulong> PerceptualDuplicateHashes,
+        IEnumerable<uint> CastagnoliHashes,
+        IEnumerable<ulong> PerceptualHashes,
+        IEnumerable<ulong> PerceptualDuplicateHashes,
         int DuplicateCount);
 
     internal record Appsettings(
